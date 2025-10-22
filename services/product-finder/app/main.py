@@ -2,10 +2,7 @@
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import requests
-import os
+from typing import Optional, Dict, Any
 import logging
 from dotenv import load_dotenv
 
@@ -17,7 +14,7 @@ app = FastAPI(
     description="Product search and discovery API for VoiceMart Shopping Assistant"
 )
 
-# CORS middleware
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,7 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic models (import from dedicated models module to avoid duplication)
+# Pydantic models
 from .models import (
     Product,
     ProductSearchRequest,
@@ -34,7 +31,9 @@ from .models import (
     ProductDetailsResponse,
 )
 
-# Root endpoint
+SUPPORTED_SOURCES = {"amazon", "ebay", "walmart"}
+
+# Root
 @app.get("/")
 async def root():
     return {
@@ -52,12 +51,11 @@ async def root():
 def health():
     return {"status": "ok"}
 
-# Product search endpoint
+# --- Search ------------------------------------------------------------------
+
 @app.post("/v1/products:search", response_model=ProductSearchResponse)
 async def search_products(request: ProductSearchRequest):
-    """
-    Search for products across multiple APIs.
-    """
+    """Search for products across Amazon, eBay, Walmart (scrapers)."""
     try:
         logger = logging.getLogger("api")
         logger.info(f"Received search request: {request.dict()}")
@@ -66,81 +64,62 @@ async def search_products(request: ProductSearchRequest):
         logger.info(f"Search returned {len(result.products)} products")
         return result
     except Exception as e:
+        logger = logging.getLogger("api")
         logger.error(f"Product search failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Product search failed: {str(e)}")
 
-# Alias without colon to avoid %3A encoding issues in some clients
-@app.post("/v1/products/search", response_model=ProductSearchResponse)
+# Hide alias in Swagger to avoid duplicate listing
+@app.post("/v1/products/search", response_model=ProductSearchResponse, include_in_schema=False)
 async def search_products_alias(request: ProductSearchRequest):
     try:
-        logger = logging.getLogger("api")
-        logger.info(f"Received search request at alias endpoint: {request.dict()}")
         from .api_clients import search_products_unified
-        result = await search_products_unified(request)
-        logger.info(f"Search returned {len(result.products)} products")
-        return result
+        return await search_products_unified(request)
     except Exception as e:
-        logger.error(f"Product search failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Product search failed: {str(e)}")
 
-# Product details endpoint
+# --- Details (SCRAPER-ONLY, URL REQUIRED) ------------------------------------
+
 @app.get("/v1/products:details")
-async def get_product_details(product_id: str, source: str = "fakestore"):
+async def get_product_details(
+    product_id: str = Query(..., description="Full product URL (http/https), URL-encoded in query"),
+    source: str = Query("amazon", description="One of: amazon, ebay, walmart")
+):
     """
-    Get detailed information about a specific product.
+    Get detailed product info using scrapers.
+    - product_id MUST be a full product URL (http/https)
+    - source MUST be one of: amazon | ebay | walmart
     """
     try:
-        from .api_clients import get_product_details
-        result = await get_product_details(product_id, source)
+        if not (product_id.startswith("http://") or product_id.startswith("https://")):
+            raise HTTPException(status_code=400, detail="product_id must be a full product URL (http/https).")
+        if source not in SUPPORTED_SOURCES:
+            raise HTTPException(status_code=422, detail=f"Unsupported source '{source}'. Allowed: {sorted(SUPPORTED_SOURCES)}")
+
+        from .api_clients import get_product_details as get_details_impl
+        result = await get_details_impl(product_id, source)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get product details: {str(e)}")
 
-# Alias without colon
-@app.get("/v1/products/details")
-async def get_product_details_alias(product_id: str, source: str = "fakestore"):
-    try:
-        from .api_clients import get_product_details
-        result = await get_product_details(product_id, source)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get product details: {str(e)}")
+# Hide alias in Swagger
+@app.get("/v1/products/details", include_in_schema=False)
+async def get_product_details_alias(product_id: str, source: str = "amazon"):
+    return await get_product_details(product_id, source)
 
-# Product categories endpoint
+# --- Categories ---------------------------------------------------------------
+
 @app.get("/v1/products:categories")
 async def get_product_categories():
-    """
-    Get available product categories.
-    """
+    """Get available product categories."""
     try:
         from .api_clients import get_categories
         categories = await get_categories()
-        return {
-            "categories": categories,
-            "total": len(categories)
-        }
+        return {"categories": categories, "total": len(categories)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
 
-# Alias without colon
-@app.get("/v1/products/categories")
+@app.get("/v1/products/categories", include_in_schema=False)
 async def get_product_categories_alias():
-    try:
-        from .api_clients import get_categories
-        categories = await get_categories()
-        return {
-            "categories": categories,
-            "total": len(categories)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
-
-
-
-
-
-
-
-
-
-
+    return await get_product_categories()

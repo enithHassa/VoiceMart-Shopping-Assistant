@@ -53,6 +53,8 @@ class ProductSearchRequest(BaseModel):
     max_price: Optional[float] = None
     brand: Optional[str] = None
     limit: int = Field(default=10, ge=1, le=50)
+    sources: Optional[List[str]] = None   # e.g., ["amazon", "ebay", "walmart"]
+    fallback: bool = True                 # enable fallback searches
 
 class ProductSearchResponse(BaseModel):
     products: List[Product]
