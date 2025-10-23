@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* App layout helpers (optional) */
+:root {
+  --header-h: 64px;
+}
