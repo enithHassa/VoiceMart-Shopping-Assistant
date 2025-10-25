@@ -57,6 +57,10 @@ async def root():
 def health():
     return {"status": "ok"}
 
+@app.post("/test")
+async def test_endpoint():
+    return {"message": "Test endpoint working"}
+
 # ---------------------- STT ----------------------
 
 @app.post("/v1/stt:transcribe", response_model=TranscriptionResult)
@@ -120,15 +124,53 @@ async def voice_understand(
 
 # ---------------------- NEW: Voice shopping (STT + Query + Products) ---------
 
-@app.post("/v1/voice:shop", response_model=VoiceUnderstandResponse)
-async def voice_shop(
+@app.post("/v1/voice:shop")
+async def voice_shop_simple(
+    file: UploadFile = File(...),
+    locale: Optional[str] = Form("en-US"),
+):
+    """Simple voice shop endpoint for testing."""
+    try:
+        # Just return a simple response for now
+        return {
+            "transcript": {
+                "text": "test voice input",
+                "language": "en",
+                "confidence": 0.9,
+                "duration": 1.0,
+                "segments": []
+            },
+            "query": {
+                "intent": "search",
+                "confidence": 0.8,
+                "slots": {"query": "test voice input"},
+                "reply": "I'll help you search for: test voice input",
+                "action": {"type": "search", "params": {"query": "test voice input"}},
+                "user_id": None,
+                "locale": locale
+            },
+            "products": [],
+            "product_search_performed": False
+        }
+    except Exception as e:
+        logger.exception("Voice shop error")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.post("/v1/voice:shop-old", response_model=VoiceUnderstandResponse)
+async def voice_shop_old(
     file: UploadFile = File(...),
     user_id: Optional[str] = Form(None),
     locale: Optional[str] = Form("en-US"),
 ):
+    # Debug logging
+    logger.info(f"Voice shop request - filename: {file.filename}, content_type: {file.content_type}, size: {file.size}")
+    
     # Validate audio
     content_type = file.content_type or ""
+    logger.info(f"Checking MIME type: '{content_type}'")
+    
     if not is_allowed_mime(content_type):
+        logger.warning(f"Unsupported media type: {content_type}")
         raise HTTPException(status_code=415, detail=f"Unsupported media type: {content_type}")
 
     contents = await file.read()

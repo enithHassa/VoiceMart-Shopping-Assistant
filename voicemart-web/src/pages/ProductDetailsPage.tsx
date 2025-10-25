@@ -1,20 +1,65 @@
 import { useParams, Link } from "react-router-dom";
+import { useProductDetails } from "../lib/hooks";
+import ProductCard from "../components/ProductCard";
 
 export default function ProductDetailsPage() {
   const { source, id } = useParams();
+  const { data, isLoading, isError } = useProductDetails(id, source, !!id);
+
+  if (isLoading) return <div>Loading details…</div>;
+  if (isError) return <div>❌ Failed to load product details.</div>;
+
+  const product = data?.product;
+
+  if (!product)
+    return (
+      <div>
+        <p className="text-gray-500">No details found.</p>
+        <Link to="/" className="text-blue-600 underline">← Back</Link>
+      </div>
+    );
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Product Details</h1>
-      <p>Source: {source}</p>
-      <p>ID: {id}</p>
+    <div className="space-y-6">
+      <Link to="/" className="text-blue-600 hover:underline text-sm">← Back to results</Link>
 
-      <Link
-        to="/"
-        className="inline-block mt-4 text-sm text-blue-600 hover:underline"
-      >
-        ← Back to search
-      </Link>
+      <div className="flex flex-col md:flex-row gap-8 bg-white border rounded-xl p-6">
+        <div className="md:w-1/3">
+          {product.image_url && (
+            <img
+              src={product.image_url}
+              alt={product.title}
+              className="w-full rounded-lg object-cover"
+            />
+          )}
+        </div>
+
+        <div className="flex-1 space-y-4">
+          <h1 className="text-2xl font-semibold">{product.title}</h1>
+          <div className="text-xl font-bold text-green-700">
+            {product.currency} {product.price.toFixed(2)}
+          </div>
+          <div className="text-sm text-gray-600">Source: {product.source}</div>
+          <p className="text-gray-700">{product.description}</p>
+
+          {data?.additional_info && (
+            <div className="text-xs text-gray-500">
+              <pre>{JSON.stringify(data.additional_info, null, 2)}</pre>
+            </div>
+          )}
+
+          {product.url && (
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-block mt-4 px-4 py-2 rounded-lg bg-black text-white"
+            >
+              View on {product.source}
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

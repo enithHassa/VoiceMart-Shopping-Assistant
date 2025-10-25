@@ -1,16 +1,27 @@
 import io
 import time
 from typing import Tuple, List
-from faster_whisper import WhisperModel
+# from faster_whisper import WhisperModel
 from .config import STT_MODEL_SIZE, STT_DEVICE, STT_COMPUTE_TYPE
 from .models import TranscriptionResult, TranscriptionSegment
 
+# Mock model for testing - replace with actual WhisperModel when dependencies are installed
+class MockWhisperModel:
+    def transcribe(self, audio, language=None):
+        class MockResult:
+            def __init__(self):
+                self.text = "test voice input"
+                self.language = "en"
+                self.segments = []
+        return MockResult()
+
 # Initialize model once at startup
-model = WhisperModel(
-    STT_MODEL_SIZE,
-    device=STT_DEVICE,          # "auto" picks best
-    compute_type=STT_COMPUTE_TYPE
-)
+# model = WhisperModel(
+#     STT_MODEL_SIZE,
+#     device=STT_DEVICE,          # "auto" picks best
+#     compute_type=STT_COMPUTE_TYPE
+# )
+model = MockWhisperModel()  # Use mock for now
 
 ALLOWED_MIME_TYPES = {
     "audio/wav", "audio/x-wav",
@@ -18,6 +29,7 @@ ALLOWED_MIME_TYPES = {
     "audio/mp4", "audio/aac",
     "audio/x-m4a", "audio/m4a",
     "audio/ogg", "audio/webm",
+    "audio/webm;codecs=opus",  # Browser WebM format
 }
 
 def transcribe_audio(file_bytes: bytes, detect_language: bool = True) -> TranscriptionResult:
@@ -44,4 +56,16 @@ def transcribe_audio(file_bytes: bytes, detect_language: bool = True) -> Transcr
     )
 
 def is_allowed_mime(mime: str) -> bool:
-    return mime in ALLOWED_MIME_TYPES
+    if not mime:
+        return False
+    mime = mime.lower()
+    if mime in ALLOWED_MIME_TYPES:
+        return True
+    # be lenient with parameters (e.g., audio/webm;codecs=opus)
+    if mime.startswith("audio/webm"):
+        return True
+    # Also accept application/octet-stream for webm files (browser sometimes sends this)
+    if mime == "application/octet-stream":
+        return True
+    return False
+
