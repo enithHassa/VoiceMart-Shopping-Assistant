@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 
 def process_query(query_text: str, user_id: Optional[str] = None, locale: str = "en-US") -> Dict[str, Any]:
     """Simple mock query processor that returns basic results."""
-        return {
+    return {
         "intent": "search",
         "confidence": 0.8,
         "slots": {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Product } from "../types/product";
-import { ExternalLink, Star, ShoppingCart, Heart, Eye } from "lucide-react";
+import { ExternalLink, Star, ShoppingCart, Heart, CheckCircle2 } from "lucide-react";
 
 function getSourceColor(source: string) {
   const colors: Record<string, { bg: string; text: string; border: string; accent: string }> = {
@@ -31,7 +31,15 @@ function getSourceColor(source: string) {
   };
 }
 
-export default function ProductCard({ product }: { product: Product }) {
+export default function ProductCard({ 
+  product, 
+  isSelected = false,
+  onSelect 
+}: { 
+  product: Product;
+  isSelected?: boolean;
+  onSelect?: () => void;
+}) {
   const sourceColor = getSourceColor(product.source);
   const [imageError, setImageError] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
@@ -76,10 +84,24 @@ export default function ProductCard({ product }: { product: Product }) {
           {product.source}
         </div>
 
-        {/* Action Buttons */}
-        <div className={`absolute top-3 right-3 flex flex-col gap-2 transition-all duration-300 ${
-          isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-2'
-        }`}>
+        {/* Action Buttons - Always visible */}
+        <div className="absolute top-3 right-3 flex flex-col gap-2">
+          {onSelect && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect();
+              }}
+              className={`p-2 rounded-full backdrop-blur-sm transition-all duration-200 ${
+                isSelected 
+                  ? 'bg-green-500 text-white' 
+                  : 'bg-white/90 text-gray-600 hover:bg-green-500 hover:text-white shadow-lg'
+              }`}
+              title={isSelected ? "Remove from comparison" : "Add to comparison"}
+            >
+              <CheckCircle2 className={`h-4 w-4 ${isSelected ? 'fill-current' : ''}`} />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -88,23 +110,10 @@ export default function ProductCard({ product }: { product: Product }) {
             className={`p-2 rounded-full backdrop-blur-sm transition-all duration-200 ${
               isLiked 
                 ? 'bg-red-500 text-white' 
-                : 'bg-white/80 text-gray-600 hover:bg-red-50 hover:text-red-500'
+                : 'bg-white/90 text-gray-600 hover:bg-red-500 hover:text-white shadow-lg'
             }`}
           >
             <Heart className={`h-4 w-4 ${isLiked ? 'fill-current' : ''}`} />
-          </button>
-          <button className="p-2 rounded-full bg-white/80 text-gray-600 hover:bg-blue-50 hover:text-blue-500 backdrop-blur-sm transition-all duration-200">
-            <Eye className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Quick View Overlay */}
-        <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-all duration-300 ${
-          isHovered ? 'opacity-100' : 'opacity-0'
-        }`}>
-          <button className="bg-white text-gray-900 px-6 py-3 rounded-full font-semibold hover:bg-gray-100 transition-colors flex items-center space-x-2">
-            <Eye className="h-4 w-4" />
-            <span>Quick View</span>
           </button>
         </div>
       </div>
@@ -210,6 +219,11 @@ export default function ProductCard({ product }: { product: Product }) {
       <div className={`absolute inset-0 rounded-2xl border-2 transition-all duration-300 pointer-events-none ${
         isHovered ? 'border-blue-200' : 'border-transparent'
       }`}></div>
+
+      {/* Selection Ring */}
+      {isSelected && (
+        <div className="absolute inset-0 rounded-2xl border-4 border-green-400 pointer-events-none animate-pulse"></div>
+      )}
     </div>
   );
 }

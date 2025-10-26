@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { User, Mail, Lock, Eye, EyeOff, Phone } from "lucide-react";
-import { signup } from "../lib/api";
+import { signup as signupAPI } from "../lib/api";
 import { useAuthStore } from "../lib/auth-store";
 import { saveUserData, type UserData } from "../lib/storage";
 
@@ -44,55 +44,31 @@ export default function SignupPage() {
     setSuccess(null);
     
     try {
-      // For now, skip API call since endpoint doesn't exist yet
-      // Just save directly to localStorage for demo purposes
+      // Call the real API to register user
+      const response = await signupAPI(data);
       
-      // Prepare user data to save
-      const userData: UserData = {
-        name: data.name,
-        email: data.email,
-        phone: data.phone,
-        password: data.password, // For demo only - in production, NEVER store plain passwords
-        id: `user_${Date.now()}`, // Generate a temporary ID
-        createdAt: new Date().toISOString(),
-      };
-
-      // Save to Zustand store (auto-persists to localStorage via persist middleware)
-      login(userData);
-
-      // Also save to localStorage directly for extra reliability
-      saveUserData(userData);
-
-      // Show success message
-      setSuccess("Account created successfully! Redirecting to login...");
-      console.log("Signup successful! User data saved to localStorage:", userData);
-      
-      // Redirect to login page after successful signup
-      setTimeout(() => {
-        navigate("/login");
-      }, 1500);
-      
-      // Optional: Try API call in background (won't block the user)
-      try {
-        const response = await signup({
-          name: data.name,
-          email: data.email,
-          password: data.password,
-          phone: data.phone,
-        });
-        console.log("Backend signup successful:", response);
+      if (response.success) {
+        const userData: UserData = {
+          id: response.user.id,
+          email: response.user.email,
+          name: response.user.name,
+          phone: response.user.phone,
+          token: response.token,
+        };
         
-        // Update with real ID and token if available
-        if (response?.user?.id || response?.id) {
-          userData.id = response.user?.id || response.id;
-          if (response.token) {
-            localStorage.setItem("voicemart_token", response.token);
-            login(userData, response.token);
-          }
-          saveUserData(userData);
-        }
-      } catch (apiError) {
-        console.log("Backend API not available - using local storage only");
+        // Save to Zustand store only (no localStorage)
+        login(userData);
+
+        // Show success message
+        setSuccess("Account created successfully! Redirecting to home...");
+        console.log("Signup successful! User data saved to database:", userData);
+        
+        // Redirect to home page after successful signup
+        setTimeout(() => {
+          navigate("/");
+        }, 1500);
+      } else {
+        setError("Registration failed. Please try again.");
       }
     } catch (err: any) {
       console.error("Signup error:", err);

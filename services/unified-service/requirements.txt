@@ -66,3 +66,16 @@ uvloop==0.21.0
 watchfiles==1.1.0
 websockets==15.0.1
 yarl==1.22.0
+
+# Database dependencies
+alembic==1.13.3
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.36
+
+# Authentication dependencies
+bcrypt==4.2.1
+passlib==1.7.4
+python-jose==3.3.0
+
+# Machine Learning dependencies
+scikit-learn==1.5.2

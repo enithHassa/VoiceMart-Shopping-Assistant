@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useReducer, useState, useCallback } from "react";
 import VoiceRecorder from "../components/VoiceRecorder";
 import ProductCard from "../components/ProductCard";
+import SearchHistorySidebar from "../components/SearchHistorySidebar";
+import RecommendationSection from "../components/RecommendationSection";
+import RecommendationBadge from "../components/RecommendationBadge";
+import SearchHistoryBadge from "../components/SearchHistoryBadge";
+import SmartDecisionAgent from "../components/SmartDecisionAgent";
 import { searchProducts } from "../lib/api";
+import { saveSearchToHistory } from "../lib/searchHistory";
+import { useAuthStore } from "../lib/auth-store";
 import { 
   Search, 
   Mic, 
@@ -98,7 +105,7 @@ const initialFilters: Filters = {
   minPrice: "",
   maxPrice: "",
   category: "",
-  sources: { amazon: false, ebay: false, walmart: false },
+  sources: { amazon: false, ebay: false, walmart: false }, // Default to no sources selected
   limit: 12,
 };
 
@@ -138,12 +145,25 @@ export default function HomePage() {
     filters: initialFilters,
   });
 
+  const { user } = useAuthStore();
+  
+  // Debug user state
+  useEffect(() => {
+    console.log("👤 User state changed:", user);
+  }, [user]);
+  
   const [loading, setLoading] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [showRecommendationSidebar, setShowRecommendationSidebar] = useState(false);
+  const [showSmartAgent, setShowSmartAgent] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+  const [searchTimeout, setSearchTimeout] = useState<number | null>(null);
+  const [isDebouncing, setIsDebouncing] = useState(false);
 
   const activeSources = useMemo(
     () => (Object.entries(filters.sources).filter(([, on]) => on).map(([k]) => k) as string[]),
@@ -183,31 +203,54 @@ export default function HomePage() {
         fallback: true,
       };
 
-      console.log("Searching products with payload:", payload);
-      console.log("Active sources:", activeSources);
+      console.log("🔍 Searching products with payload:", payload);
+      console.log("📍 Active sources:", activeSources);
+      console.log("⚙️ Current filters.sources:", filters.sources);
+      console.log("🌐 API URL:", import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000");
 
       const result = await searchProducts(payload);
-      console.log("Products received:", result);
+      console.log("✅ Products received from API:", result);
+      console.log("📊 Product count:", result.products?.length || 0);
+      console.log("🏷️ Product sources:", result.products?.map(p => p.source) || []);
 
       if (result.products && result.products.length > 0) {
+        console.log("✅ Setting real products from API");
         setProducts(result.products);
         setAllProducts(result.products);
         setHasSearched(true);
         setError(null);
+        
+        // Save search to history if user is logged in
+        if (user) {
+          try {
+            await saveSearchToHistory(
+              query.trim(),
+              activeSources,
+              result.products.length,
+              user.id
+            );
+            console.log("💾 Search saved to history for user:", user.name);
+          } catch (error) {
+            console.error("Failed to save search to history:", error);
+          }
+        }
       } else {
         // Generate demo products as fallback
-        console.log("No products from API, generating demo products");
+        console.log("⚠️ No products from API, generating demo products");
         const demoProducts = generateDemoProducts(query, activeSources);
+        console.log("🎭 Demo products generated:", demoProducts);
         setProducts(demoProducts);
         setAllProducts(demoProducts);
         setHasSearched(true);
         setError("No products found. Showing demo results. Make sure the backend API is running at http://localhost:8000 for real results.");
       }
     } catch (error: any) {
-      console.error("Search error:", error);
-      setError("Failed to search products. Please try again.");
+      console.error("❌ Search error:", error);
+      console.error("❌ Error details:", error.message);
+      setError(`Failed to search products: ${error.message}`);
       
       // Generate demo products as fallback
+      console.log("🎭 Generating demo products due to error");
       const demoProducts = generateDemoProducts(query, activeSources);
       setProducts(demoProducts);
       setAllProducts(demoProducts);
@@ -216,6 +259,38 @@ export default function HomePage() {
       setLoading(false);
     }
   }, [query, filters, activeSources]);
+
+  // ----- Debounced Search -----
+  const debouncedSearch = useCallback(() => {
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Set debouncing state
+    setIsDebouncing(true);
+    
+    // Set new timeout
+    const timeout = setTimeout(() => {
+      console.log("🔍 Debounced search triggered");
+      setIsDebouncing(false);
+      searchByText();
+    }, 1500); // 1.5 second delay
+    
+    setSearchTimeout(timeout);
+  }, [searchTimeout, searchByText]);
+
+  const handleVoiceTranscript = useCallback((transcript: string) => {
+    console.log("🎤 Voice transcript received:", transcript);
+    dispatch({ type: "SET_QUERY", value: transcript });
+    
+    // Automatically search when we get a transcript
+    if (transcript.trim()) {
+      setTimeout(() => {
+        searchByText();
+      }, 500); // Small delay to ensure the query state is updated
+    }
+  }, [searchByText]);
 
   const searchByVoiceFile = useCallback(async (file: File) => {
     console.log("🎤 Simple voice search started");
@@ -343,6 +418,16 @@ export default function HomePage() {
     return baseProducts.filter(product => sources.includes(product.source));
   };
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+        setIsDebouncing(false);
+      }
+    };
+  }, [searchTimeout]);
+
   // Handle Enter key press
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
@@ -350,16 +435,88 @@ export default function HomePage() {
     }
   };
 
-  // Handle source toggle with search
+  // Handle source toggle
   const handleSourceToggle = (source: keyof Filters["sources"]) => {
+    console.log(`Toggling source: ${source}, current state:`, filters.sources);
     dispatch({ type: "TOGGLE_SOURCE", source });
-    // Trigger search after a short delay to allow state update
-    setTimeout(() => {
-      if (query.trim() && activeSources.length > 0) {
-        searchByText();
-      }
-    }, 100);
   };
+
+  // Trigger search when sources change (but not on initial load)
+  useEffect(() => {
+    console.log(`🔄 Source change detected:`, {
+      hasSearched,
+      query: query.trim(),
+      activeSources,
+      activeSourcesLength: activeSources.length
+    });
+    
+    if (hasSearched && query.trim() && activeSources.length > 0) {
+      console.log(`✅ Sources changed, triggering debounced search with:`, activeSources);
+      debouncedSearch();
+    } else {
+      console.log(`⏸️ Not triggering search:`, {
+        reason: !hasSearched ? 'not searched yet' : !query.trim() ? 'no query' : 'no sources selected'
+      });
+    }
+  }, [activeSources, hasSearched, query, debouncedSearch]);
+
+  // Handle search from history
+  const handleSearchFromHistory = useCallback((query: string, sources: string[]) => {
+    console.log(`🔄 Searching from history:`, { query, sources });
+    
+    // Clear any pending debounced search
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      setSearchTimeout(null);
+      setIsDebouncing(false);
+    }
+    
+    // Update the query
+    dispatch({ type: "SET_QUERY", value: query });
+    
+    // Update sources
+    const newSources = { amazon: false, ebay: false, walmart: false };
+    sources.forEach(source => {
+      if (source in newSources) {
+        newSources[source as keyof typeof newSources] = true;
+      }
+    });
+    
+    // Update filters with new sources
+    Object.entries(newSources).forEach(([source, isSelected]) => {
+      if (isSelected !== filters.sources[source as keyof typeof filters.sources]) {
+        dispatch({ type: "TOGGLE_SOURCE", source: source as keyof typeof filters.sources });
+      }
+    });
+    
+    // Close the sidebar
+    setShowHistorySidebar(false);
+    
+    // Trigger search immediately (no debouncing for history searches)
+    setTimeout(() => {
+      searchByText();
+     }, 100);
+   }, [filters.sources, searchByText, searchTimeout]);
+
+  // Handle product selection for Smart Agent
+  const handleToggleProductSelection = useCallback((product: Product) => {
+    setSelectedProducts(prev => {
+      const isSelected = prev.some(p => p.id === product.id);
+      if (isSelected) {
+        return prev.filter(p => p.id !== product.id);
+      } else {
+        return [...prev, product];
+      }
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedProducts([]);
+  }, []);
+
+  const handleRemoveProduct = useCallback((productId: string) => {
+    setSelectedProducts(prev => prev.filter(p => p.id !== productId));
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
@@ -373,12 +530,14 @@ export default function HomePage() {
                 <Sparkles className="h-8 w-8 text-white" />
               </div>
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-              Find Your Perfect
-              <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                {" "}Products
-              </span>
-            </h1>
+             <div className="flex items-center justify-center mb-6">
+               <h1 className="text-4xl md:text-6xl font-bold text-gray-900">
+                 Find Your Perfect
+                 <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                   {" "}Products
+                 </span>
+               </h1>
+             </div>
             <p className="text-xl text-gray-600 mb-12 max-w-3xl mx-auto">
               Search across Amazon, eBay, and Walmart with voice or text. 
               Get the best deals and compare prices instantly.
@@ -399,21 +558,27 @@ export default function HomePage() {
                       className="flex-1 text-lg border-none outline-none placeholder-gray-500"
                     />
                   </div>
-                  <div className="flex items-center space-x-2 pr-4">
-                    <VoiceRecorder
-                      onComplete={searchByVoiceFile}
-                      autoSend={true}
-                      label="Hold to talk"
-                    />
+                    <div className="flex items-center space-x-2 pr-4">
+                      <VoiceRecorder
+                        onTranscript={handleVoiceTranscript}
+                        autoSend={true}
+                        label="Hold to talk"
+                        onComplete={() => {}} // Required prop but not used
+                      />
                     <button
                       onClick={searchByText}
-                      disabled={loading || !query.trim()}
+                      disabled={loading || !query.trim() || activeSources.length === 0}
                       className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center space-x-2"
                     >
                       {loading ? (
                         <>
                           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
                           <span>Searching...</span>
+                        </>
+                      ) : isDebouncing ? (
+                        <>
+                          <div className="animate-pulse rounded-full h-5 w-5 bg-white opacity-70"></div>
+                          <span>Typing...</span>
                         </>
                       ) : (
                         <>
@@ -425,6 +590,24 @@ export default function HomePage() {
                   </div>
                 </div>
               </div>
+
+              {/* Source Selection Helper */}
+              {activeSources.length === 0 && (
+                <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <div className="w-5 h-5 bg-yellow-400 rounded-full flex items-center justify-center">
+                        <span className="text-yellow-800 text-xs font-bold">!</span>
+                      </div>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm text-yellow-800">
+                        <strong>Please select at least one source</strong> (Amazon, eBay, or Walmart) to search for products.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Quick Stats */}
               <div className="mt-8 flex justify-center space-x-8 text-sm text-gray-600">
@@ -633,25 +816,31 @@ export default function HomePage() {
             )}
 
             {/* Products Grid */}
-            {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {[...Array(8)].map((_, i) => (
-                  <div key={i} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden animate-pulse">
-                    <div className="h-48 bg-gray-200"></div>
-                    <div className="p-6">
-                      <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                      <div className="h-4 bg-gray-200 rounded mb-4 w-3/4"></div>
-                      <div className="h-6 bg-gray-200 rounded w-1/2"></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : products.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {products.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
+             {loading ? (
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                 {[...Array(6)].map((_, i) => (
+                   <div key={i} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden animate-pulse">
+                     <div className="h-64 bg-gray-200"></div>
+                     <div className="p-6">
+                       <div className="h-5 bg-gray-200 rounded mb-3"></div>
+                       <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                       <div className="h-4 bg-gray-200 rounded mb-4 w-3/4"></div>
+                       <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             ) : products.length > 0 ? (
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                 {products.map((product) => (
+                   <ProductCard 
+                     key={product.id} 
+                     product={product}
+                     isSelected={selectedProducts.some(p => p.id === product.id)}
+                     onSelect={() => handleToggleProductSelection(product)}
+                   />
+                 ))}
+               </div>
             ) : hasSearched ? (
               <div className="text-center py-16">
                 <ShoppingBag className="h-16 w-16 text-gray-300 mx-auto mb-4" />
@@ -674,6 +863,63 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {/* Search History Sidebar */}
+      <SearchHistorySidebar
+        isOpen={showHistorySidebar}
+        onClose={() => setShowHistorySidebar(false)}
+        onSearchFromHistory={handleSearchFromHistory}
+      />
+
+      {/* Recommendation Badge */}
+      <RecommendationBadge
+        isOpen={showRecommendationSidebar}
+        onClick={() => setShowRecommendationSidebar(!showRecommendationSidebar)}
+        user={user}
+      />
+
+      {/* Search History Badge */}
+      <SearchHistoryBadge
+        isOpen={showHistorySidebar}
+        onClick={() => setShowHistorySidebar(!showHistorySidebar)}
+        user={user}
+      />
+
+      {/* Recommendation Sidebar */}
+      {user && (
+        <RecommendationSection
+          userId={user.id}
+          title="Recommended for You"
+          limit={8}
+          isOpen={showRecommendationSidebar}
+          onClose={() => setShowRecommendationSidebar(false)}
+        />
+      )}
+
+      {/* Smart Decision Agent Button */}
+      {selectedProducts.length > 0 && (
+        <button
+          onClick={() => setShowSmartAgent(true)}
+          className="fixed bottom-8 right-8 bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-4 rounded-full shadow-2xl hover:from-purple-700 hover:to-indigo-700 transition-all duration-300 hover:scale-110 flex items-center space-x-3 z-30"
+        >
+          <div className="relative">
+            <Sparkles className="h-6 w-6" />
+            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {selectedProducts.length}
+            </span>
+          </div>
+          <span className="font-semibold">Find Best Deal</span>
+        </button>
+      )}
+
+      {/* Smart Decision Agent Modal */}
+      <SmartDecisionAgent
+        isOpen={showSmartAgent}
+        onClose={() => setShowSmartAgent(false)}
+        selectedProducts={selectedProducts}
+        onClearSelection={handleClearSelection}
+        onRemoveProduct={handleRemoveProduct}
+      />
     </div>
   );
 }

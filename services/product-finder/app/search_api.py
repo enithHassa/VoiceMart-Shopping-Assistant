@@ -8,12 +8,16 @@ import os
 import logging
 from dotenv import load_dotenv
 from .scrapers import AmazonScraper, EbayScraper, WalmartScraper, ScraperManager
+from .hybrid_search import HybridProductSearch
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize scrapers
+# Initialize hybrid search (APIs + scrapers)
+hybrid_search = HybridProductSearch()
+
+# Keep old scrapers for fallback
 amazon_scraper = AmazonScraper()
 ebay_scraper = EbayScraper()
 walmart_scraper = WalmartScraper()
@@ -26,31 +30,28 @@ async def search_products_unified(request: ProductSearchRequest) -> ProductSearc
     sources = [s.lower() for s in (request.sources or ["amazon", "ebay", "walmart"])]
     logger.info(f"Searching for '{request.query}' across: {sources}")
 
-    loop = asyncio.get_event_loop()
-    scraper_results = await loop.run_in_executor(
-        None,
-        lambda: scraper_manager.search_products(
+    # Use hybrid search (APIs + scrapers)
+    try:
+        scraper_results = await hybrid_search.search_products(
             query=request.query,
-            limit=request.limit * 2,
             sources=sources,
-            parallel=True
+            limit=request.limit * 2
         )
-    )
-
-    if not scraper_results and getattr(request, "fallback", True):
-        fallback_sources = ['amazon', 'ebay', 'walmart']
-        logger.info(f"Fallback triggered to all sources: {fallback_sources}")
+        logger.info(f"Hybrid search returned {len(scraper_results)} results")
+    except Exception as e:
+        logger.error(f"Hybrid search failed: {e}")
+        # Fallback to old scraper approach
+        loop = asyncio.get_event_loop()
         scraper_results = await loop.run_in_executor(
             None,
             lambda: scraper_manager.search_products(
                 query=request.query,
                 limit=request.limit * 2,
-                sources=fallback_sources,
+                sources=sources,
                 parallel=True
             )
         )
-
-    logger.info(f"Got {len(scraper_results)} raw results")
+        logger.info(f"Fallback scraper returned {len(scraper_results)} results")
 
     # Filter + normalize
     products: List[Product] = []
@@ -87,8 +88,29 @@ async def search_products_unified(request: ProductSearchRequest) -> ProductSearc
             source=item.get('source', 'unknown'),
         ))
 
+    # Sort products but ensure we get a good mix from all sources
     products.sort(key=lambda x: (request.query.lower() in x.title.lower(), x.rating or 0), reverse=True)
-    limited = products[:request.limit]
+    
+    # Group products by source to ensure we get products from all sources
+    products_by_source = {}
+    for product in products:
+        source = product.source
+        if source not in products_by_source:
+            products_by_source[source] = []
+        products_by_source[source].append(product)
+    
+    # Take products from each source to ensure diversity
+    limited = []
+    max_per_source = max(1, request.limit // len(sources)) if sources else request.limit
+    
+    for source in sources:
+        if source in products_by_source:
+            limited.extend(products_by_source[source][:max_per_source])
+    
+    # If we still need more products, add the best remaining ones
+    if len(limited) < request.limit:
+        remaining = [p for p in products if p not in limited]
+        limited.extend(remaining[:request.limit - len(limited)])
 
     return ProductSearchResponse(
         products=limited,

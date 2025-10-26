@@ -1,0 +1,28 @@
+# Environment variables template for VoiceMart
+
+# Database Configuration
+DATABASE_URL=postgresql://voicemart:password@localhost:5432/voicemart_db
+# For development with SQLite:
+# DATABASE_URL=sqlite:///./voicemart.db
+
+# JWT Configuration
+SECRET_KEY=your-super-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# API Configuration
+PRODUCT_FINDER_URL=http://localhost:8003
+API_BASE_URL=http://localhost:8000
+
+# STT Configuration
+STT_MODEL_SIZE=small
+STT_DEVICE=auto
+STT_COMPUTE_TYPE=int8
+MAX_UPLOAD_MB=25
+
+# Recommendation Engine
+RECOMMENDATION_CACHE_HOURS=24
+MIN_INTERACTIONS_FOR_RECOMMENDATIONS=5
+
+# Logging
+LOG_LEVEL=INFO

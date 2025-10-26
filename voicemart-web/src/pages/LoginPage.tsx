@@ -5,7 +5,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { useAuthStore } from "../lib/auth-store";
-import { getUserData, saveUserData, type UserData } from "../lib/storage";
+import { saveUserData, type UserData } from "../lib/storage";
+import { login as loginAPI } from "../lib/api";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -36,43 +37,32 @@ export default function LoginPage() {
     setSuccess(null);
 
     try {
-      // Check localStorage for user data
-      const storedUser = getUserData();
+      // Call the real API to login user
+      const response = await loginAPI({ email: data.email, password: data.password });
       
-      if (!storedUser) {
-        setError("No account found. Please sign up first.");
-        return;
+      if (response.success) {
+        const userData: UserData = {
+          id: response.user.id,
+          email: response.user.email,
+          name: response.user.name,
+          phone: response.user.phone,
+          token: response.token,
+        };
+        
+        // Save to Zustand store only (no localStorage)
+        login(userData);
+
+        // Show success message
+        setSuccess("Login successful! Redirecting...");
+        console.log("Login successful! User:", userData);
+
+        // Redirect to home page after successful login
+        setTimeout(() => {
+          navigate("/");
+        }, 1000);
+      } else {
+        setError("Login failed. Please check your credentials.");
       }
-
-      // Simple validation - in real app, this would check password against backend
-      if (storedUser.email !== data.email) {
-        setError("Invalid email or password.");
-        return;
-      }
-
-      // Check password if it exists in stored user data (demo only)
-      if (storedUser.password && storedUser.password !== data.password) {
-        setError("Invalid email or password.");
-        return;
-      }
-
-      // For demo purposes, we verify email and password match
-      // In production, you'd verify the password with backend API
-
-      // Update authentication status
-      saveUserData(storedUser);
-      
-      // Update Zustand store
-      login(storedUser);
-
-      // Show success message
-      setSuccess("Login successful! Redirecting...");
-      console.log("Login successful! User:", storedUser);
-
-      // Redirect to home page after successful login
-      setTimeout(() => {
-        navigate("/");
-      }, 1000);
     } catch (err: any) {
       console.error("Login error:", err);
       setError("Something went wrong. Please try again.");

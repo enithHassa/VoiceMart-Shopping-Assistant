@@ -3,13 +3,28 @@ import { useMediaRecorder } from "../lib/recorder";
 
 type Props = {
   onComplete: (file: File) => void; // called when user stops and we have a blob
+  onTranscript?: (text: string) => void; // called when we get a transcript
   autoSend?: boolean;               // if true, auto fire onComplete on stop
   label?: string;
   disabled?: boolean;
 };
 
-export default function VoiceRecorder({ onComplete, autoSend = true, label = "Hold to talk", disabled = false }: Props) {
-  const { isRecording, durationSec, blob, start, stop, cancel, error, mimeType } = useMediaRecorder();
+export default function VoiceRecorder({ onComplete, onTranscript, label = "Hold to talk", disabled = false }: Props) {
+  const { 
+    isRecording, 
+    recordingTime, 
+    transcript,
+    isProcessing,
+    error,
+    startRecording, 
+    stopRecording, 
+    resetRecording, 
+    hasPermission 
+  } = useMediaRecorder({
+    onTranscript: (text) => {
+      onTranscript?.(text);
+    }
+  });
   const MIN_RECORDING_SECONDS = 1; // Minimum 1 second of recording
   const isMouseDownRef = useRef(false);
 
@@ -41,14 +56,12 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
   //   };
   // }, [isRecording, stop]);
 
-  // When recording ends, turn Blob -> File and hand it off
+  // Cleanup on unmount
   useEffect(() => {
-    if (!blob) return;
-    const ext = mimeType.includes("mp4") ? "mp4" : "webm";
-    const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType || blob.type });
-    if (autoSend) onComplete(file);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blob]);
+    return () => {
+      resetRecording();
+    };
+  }, [resetRecording]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     console.log("🖱️ Mouse down event");
@@ -57,7 +70,7 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
     isMouseDownRef.current = true;
     if (!disabled && !isRecording) {
       console.log("🎤 Starting voice recording...");
-      start();
+      startRecording();
     } else {
       console.log("⚠️ Cannot start:", { disabled, isRecording });
     }
@@ -65,13 +78,13 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
 
   const handleMouseUp = (e: React.MouseEvent) => {
     console.log("🖱️ Mouse up event");
-    console.log("🖱️ Current state:", { isRecording, durationSec, MIN_RECORDING_SECONDS });
+    console.log("🖱️ Current state:", { isRecording, recordingTime, MIN_RECORDING_SECONDS });
     e.preventDefault();
     e.stopPropagation();
     isMouseDownRef.current = false;
     if (isRecording) {
       console.log("🎤 Stopping voice recording...");
-      stop();
+      stopRecording();
     } else {
       console.log("⚠️ Not recording, ignoring mouse up");
     }
@@ -79,7 +92,7 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
 
   const handleMouseLeave = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (isRecording) stop();
+    if (isRecording) stopRecording();
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -89,7 +102,7 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
     isMouseDownRef.current = true;
     if (!disabled && !isRecording) {
       console.log("🎤 Starting voice recording (touch)...");
-      start();
+      startRecording();
     } else {
       console.log("⚠️ Cannot start (touch):", { disabled, isRecording });
     }
@@ -97,13 +110,13 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     console.log("👆 Touch end event");
-    console.log("👆 Current state:", { isRecording, durationSec, MIN_RECORDING_SECONDS });
+    console.log("👆 Current state:", { isRecording, recordingTime, MIN_RECORDING_SECONDS });
     e.preventDefault();
     e.stopPropagation();
     isMouseDownRef.current = false;
     if (isRecording) {
       console.log("🎤 Stopping voice recording (touch)...");
-      stop();
+      stopRecording();
     } else {
       console.log("⚠️ Not recording (touch), ignoring touch end");
     }
@@ -143,11 +156,23 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
           {disabled 
             ? "Voice search disabled" 
             : isRecording 
-              ? `Recording… ${durationSec}s` 
-              : "Click & hold to record"
+              ? `Recording… ${recordingTime}s` 
+              : isProcessing
+                ? "Processing speech..."
+                : "Click & hold to record"
           }
         </div>
-        {error && <div className="text-red-600 text-xs">{error}</div>}
+        {transcript && !isProcessing && (
+          <div className="text-green-600 text-xs mt-1 max-w-64">
+            "{transcript}"
+          </div>
+        )}
+        {error && (
+          <div className="text-red-600 text-xs mt-1 max-w-64">
+            {error}
+          </div>
+        )}
+        {hasPermission === false && <div className="text-red-600 text-xs">Microphone permission denied</div>}
       </div>
 
       {isRecording && (
@@ -156,7 +181,7 @@ export default function VoiceRecorder({ onComplete, autoSend = true, label = "Ho
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            cancel();
+            resetRecording();
           }}
           type="button"
         >

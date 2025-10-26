@@ -1,7 +1,7 @@
 import { Outlet, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "../lib/auth-store";
-import { getUserData, isAuthenticated } from "../lib/storage";
+import { getUserData } from "../lib/storage";
 
 export default function MainLayout() {
   const [userName, setUserName] = useState<string | null>(null);

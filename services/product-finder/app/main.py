@@ -59,7 +59,7 @@ async def search_products(request: ProductSearchRequest):
     try:
         logger = logging.getLogger("api")
         logger.info(f"Received search request: {request.dict()}")
-        from .api_clients import search_products_unified
+        from .search_api import search_products_unified
         result = await search_products_unified(request)
         logger.info(f"Search returned {len(result.products)} products")
         return result
@@ -72,7 +72,7 @@ async def search_products(request: ProductSearchRequest):
 @app.post("/v1/products/search", response_model=ProductSearchResponse, include_in_schema=False)
 async def search_products_alias(request: ProductSearchRequest):
     try:
-        from .api_clients import search_products_unified
+        from .search_api import search_products_unified
         return await search_products_unified(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Product search failed: {str(e)}")
@@ -95,7 +95,7 @@ async def get_product_details(
         if source not in SUPPORTED_SOURCES:
             raise HTTPException(status_code=422, detail=f"Unsupported source '{source}'. Allowed: {sorted(SUPPORTED_SOURCES)}")
 
-        from .api_clients import get_product_details as get_details_impl
+        from .search_api import get_product_details as get_details_impl
         result = await get_details_impl(product_id, source)
         return result
     except HTTPException:
@@ -114,7 +114,7 @@ async def get_product_details_alias(product_id: str, source: str = "amazon"):
 async def get_product_categories():
     """Get available product categories."""
     try:
-        from .api_clients import get_categories
+        from .search_api import get_categories
         categories = await get_categories()
         return {"categories": categories, "total": len(categories)}
     except Exception as e:

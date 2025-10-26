@@ -1,15 +1,11 @@
 import { useParams, Link } from "react-router-dom";
 import { useProductDetails } from "../lib/hooks";
-import ProductCard from "../components/ProductCard";
-
 export default function ProductDetailsPage() {
-  const { source, id } = useParams();
-  const { data, isLoading, isError } = useProductDetails(id, source, !!id);
+  const { id } = useParams();
+  const { product, loading, error } = useProductDetails(id || '');
 
-  if (isLoading) return <div>Loading details…</div>;
-  if (isError) return <div>❌ Failed to load product details.</div>;
-
-  const product = data?.product;
+  if (loading) return <div>Loading details…</div>;
+  if (error) return <div>❌ Failed to load product details: {error}</div>;
 
   if (!product)
     return (
@@ -42,11 +38,6 @@ export default function ProductDetailsPage() {
           <div className="text-sm text-gray-600">Source: {product.source}</div>
           <p className="text-gray-700">{product.description}</p>
 
-          {data?.additional_info && (
-            <div className="text-xs text-gray-500">
-              <pre>{JSON.stringify(data.additional_info, null, 2)}</pre>
-            </div>
-          )}
 
           {product.url && (
             <a
