@@ -21,6 +21,7 @@ from .models import (
 )
 from .processor import process_query  # LLM agent lives here
 from .database import get_db, create_tables
+from .services.conversation_manager import process_voice_query, get_conversation, clear_conversation
 from .services.user_service import UserService
 from .services.search_history_service import SearchHistoryService
 from .services.recommendation_service import RecommendationService
@@ -278,6 +279,151 @@ async def voice_shop_simple(
     except Exception as e:
         logger.exception("Voice shop error")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# ---------------------- Conversational Voice Shopping ----------------------
+
+@app.post("/v1/voice:converse")
+async def voice_converse(
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+    user_id: Optional[str] = Form(None),
+    locale: Optional[str] = Form("en-US"),
+    reset: bool = Form(False)
+):
+    """
+    Conversational voice shopping - maintains context across multiple voice commands
+    Returns follow-up questions or products based on conversation state
+    """
+    try:
+        # Validate audio
+        content_type = file.content_type or ""
+        if not is_allowed_mime(content_type):
+            raise HTTPException(status_code=415, detail=f"Unsupported media type: {content_type}")
+
+        contents = await file.read()
+        max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+        if len(contents) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File too large (> {MAX_UPLOAD_MB}MB)")
+
+        # Transcribe audio
+        stt_result = transcribe_audio(contents, detect_language=True)
+        transcript_text = stt_result.text or ""
+
+        # Process with conversation manager
+        conv_response = process_voice_query(session_id, user_id, transcript_text, reset)
+        
+        # If conversation is ready to search, perform product search
+        products = []
+        product_search_performed = False
+        
+        if conv_response.get("ready_to_search") and conv_response.get("search_params"):
+            search_params = conv_response["search_params"]
+            try:
+                from .product_finder import search_products
+                price_range = search_params.get("price_range") or {}
+                req = ProductSearchRequest(
+                    query=search_params.get("query", transcript_text),
+                    category=search_params.get("category"),
+                    min_price=price_range.get("min") if price_range else None,
+                    max_price=price_range.get("max") if price_range else None,
+                    brand=search_params.get("brand"),
+                    limit=8,
+                    sources=["amazon", "ebay", "walmart"],
+                    fallback=True,
+                )
+                search_result = await search_products(req)
+                products = search_result.products or []
+                product_search_performed = True
+            except Exception as e:
+                logger.warning(f"Product search failed in conversation: {e}")
+                product_search_performed = False
+
+        return {
+            "transcript": {
+                "text": transcript_text,
+                "language": stt_result.language or "en",
+                "confidence": getattr(stt_result, 'confidence', None) or 0.9,
+                "duration": stt_result.duration or 1.0,
+            },
+            "conversation": {
+                "session_id": session_id,
+                "query": conv_response.get("query", transcript_text),
+                "question": conv_response.get("question"),  # Follow-up question or None
+                "ready_to_search": conv_response.get("ready_to_search", False)
+            },
+            "products": products,
+            "product_search_performed": product_search_performed
+        }
+    except Exception as e:
+        logger.exception("Voice conversation error")
+        raise HTTPException(status_code=500, detail=f"Conversation error: {str(e)}")
+
+@app.post("/v1/voice:conversation/clear")
+async def clear_conversation_endpoint(session_id: str = Form(...)):
+    """Clear conversation state"""
+    clear_conversation(session_id)
+    return {"message": "Conversation cleared", "session_id": session_id}
+
+@app.post("/v1/voice:conversation/test")
+async def test_conversation(
+    text: str = Form(...),
+    session_id: str = Form(...),
+    user_id: Optional[str] = Form(None),
+    reset: bool = Form(False)
+):
+    """
+    Test endpoint for conversation - accepts text directly (no audio)
+    For testing purposes only
+    """
+    try:
+        # Process with conversation manager
+        conv_response = process_voice_query(session_id, user_id, text, reset)
+        
+        # If conversation is ready to search, perform product search
+        products = []
+        product_search_performed = False
+        
+        if conv_response.get("ready_to_search") and conv_response.get("search_params"):
+            search_params = conv_response["search_params"]
+            try:
+                from .product_finder import search_products
+                price_range = search_params.get("price_range") or {}
+                req = ProductSearchRequest(
+                    query=search_params.get("query", text),
+                    category=search_params.get("category"),
+                    min_price=price_range.get("min") if price_range else None,
+                    max_price=price_range.get("max") if price_range else None,
+                    brand=search_params.get("brand"),
+                    limit=8,
+                    sources=["amazon", "ebay", "walmart"],
+                    fallback=True,
+                )
+                search_result = await search_products(req)
+                products = search_result.products or []
+                product_search_performed = True
+            except Exception as e:
+                logger.warning(f"Product search failed in conversation test: {e}")
+                product_search_performed = False
+
+        return {
+            "transcript": {
+                "text": text,
+                "language": "en",
+                "confidence": 1.0,
+                "duration": 0.0,
+            },
+            "conversation": {
+                "session_id": session_id,
+                "query": conv_response.get("query", text),
+                "question": conv_response.get("question"),
+                "ready_to_search": conv_response.get("ready_to_search", False)
+            },
+            "products": products,
+            "product_search_performed": product_search_performed
+        }
+    except Exception as e:
+        logger.exception("Voice conversation test error")
+        raise HTTPException(status_code=500, detail=f"Conversation test error: {str(e)}")
 
 @app.post("/v1/voice:shop-old", response_model=VoiceUnderstandResponse)
 async def voice_shop_old(

@@ -68,21 +68,7 @@ export default function RecommendationSection({
          console.log('🎯 Recommendation data received:', data);
          console.log('🎯 First recommendation:', data.recommendations?.[0]);
          
-         // Add a test product to see if rendering works
-         const testProduct = {
-           id: 'test-123',
-           title: 'Test Product Title',
-           price: 99.99,
-           currency: 'USD',
-           image_url: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&h=400&fit=crop',
-           rating: 4.5,
-           source: 'amazon',
-           recommendation_type: 'test',
-           recommendation_reason: 'This is a test product',
-           recommendation_score: 0.8
-         };
-         
-         const allRecommendations = [testProduct, ...(data.recommendations || [])];
+         const allRecommendations = data.recommendations || [];
          console.log('🎯 Setting recommendations:', allRecommendations);
          setRecommendations(allRecommendations);
         
@@ -167,7 +153,7 @@ export default function RecommendationSection({
                 {recommendations.map((product, index) => (
                   <div 
                     key={product.id} 
-                    className="flex-shrink-0 w-80 bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-lg transition-all duration-300 hover:scale-105"
+                    className="flex-shrink-0 w-80 bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-lg transition-all duration-300 hover:scale-105 relative"
                     onClick={() => {
                       if (product.url) {
                         window.open(product.url, '_blank', 'noopener,noreferrer');
@@ -185,6 +171,25 @@ export default function RecommendationSection({
                           target.src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400&h=400&fit=crop';
                         }}
                       />
+                      
+                      {/* Recommendation Badge */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <div className={`px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 shadow-lg ${
+                          product.recommendation_type === 'content_based' ? 'bg-blue-100 text-blue-800' : 
+                          product.recommendation_type === 'collaborative' ? 'bg-green-100 text-green-800' :
+                          product.recommendation_type === 'trending' ? 'bg-orange-100 text-orange-800' : 'bg-purple-100 text-purple-800'
+                        }`}>
+                          {getRecommendationIcon(product.recommendation_type)}
+                          <span className="capitalize">{product.recommendation_type.replace('_', ' ')}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Recommendation Score */}
+                      <div className="absolute top-3 right-3 z-10">
+                        <div className="bg-white bg-opacity-95 backdrop-blur-sm px-2 py-1 rounded-full text-xs font-semibold text-gray-700 shadow-lg">
+                          {Math.round(product.recommendation_score * 100)}%
+                        </div>
+                      </div>
                     </div>
                     
                     {/* Product Info */}

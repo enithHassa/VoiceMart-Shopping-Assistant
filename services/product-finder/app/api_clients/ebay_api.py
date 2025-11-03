@@ -7,7 +7,7 @@ logger = logging.getLogger('ebay_api')
 
 class EbayAPIClient:
     def __init__(self, client_id: Optional[str] = None):
-        self.client_id = client_id or "YOUR_EBAY_CLIENT_ID"  # Replace with actual client ID
+        self.client_id = client_id or ""  # Replace with actual client ID
         self.base_url = "https://api.ebay.com"
         self.headers = {
             "Authorization": f"Bearer {self.client_id}",

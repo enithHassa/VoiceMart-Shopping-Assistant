@@ -4,6 +4,7 @@ import HomePage from "./pages/HomePage";
 import ProductDetailsPage from "./pages/ProductDetailsPage";
 import SignupPage from "./pages/SignupPage";
 import LoginPage from "./pages/LoginPage";
+import ConversationTest from "./components/ConversationTest";
 import { useAuthStore } from "./lib/auth-store";
 import { isAuthenticated } from "./lib/storage";
 
@@ -16,6 +17,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/test-conversation" element={<ConversationTest />} />
         <Route element={<MainLayout />}>
           <Route 
             path="/" 

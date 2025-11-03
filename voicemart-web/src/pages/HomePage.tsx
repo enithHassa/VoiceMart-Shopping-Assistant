@@ -6,6 +6,9 @@ import RecommendationSection from "../components/RecommendationSection";
 import RecommendationBadge from "../components/RecommendationBadge";
 import SearchHistoryBadge from "../components/SearchHistoryBadge";
 import SmartDecisionAgent from "../components/SmartDecisionAgent";
+import ConversationBanner from "../components/ConversationBanner";
+import ConversationChat from "../components/ConversationChat";
+import { testVoiceConversation } from "../lib/api";
 import { searchProducts } from "../lib/api";
 import { saveSearchToHistory } from "../lib/searchHistory";
 import { useAuthStore } from "../lib/auth-store";
@@ -164,6 +167,12 @@ export default function HomePage() {
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
   const [searchTimeout, setSearchTimeout] = useState<number | null>(null);
   const [isDebouncing, setIsDebouncing] = useState(false);
+  
+  // Conversation state
+  const [sessionId] = useState(() => `session-${Date.now()}`);
+  const [conversationQuestion, setConversationQuestion] = useState<string | null>(null);
+  const [conversationMode, setConversationMode] = useState(false); // Disabled by default
+  const [showConversationChat, setShowConversationChat] = useState(false);
 
   const activeSources = useMemo(
     () => (Object.entries(filters.sources).filter(([, on]) => on).map(([k]) => k) as string[]),
@@ -280,17 +289,47 @@ export default function HomePage() {
     setSearchTimeout(timeout);
   }, [searchTimeout, searchByText]);
 
-  const handleVoiceTranscript = useCallback((transcript: string) => {
+  const handleVoiceTranscript = useCallback(async (transcript: string) => {
     console.log("🎤 Voice transcript received:", transcript);
-    dispatch({ type: "SET_QUERY", value: transcript });
     
-    // Automatically search when we get a transcript
-    if (transcript.trim()) {
-      setTimeout(() => {
-        searchByText();
-      }, 500); // Small delay to ensure the query state is updated
+    try {
+      // Use conversation API if in conversation mode
+      if (conversationMode) {
+        const response = await testVoiceConversation(transcript, sessionId, user?.id || null, false);
+        
+        // Check if there's a follow-up question
+        if (response.conversation.question) {
+          setConversationQuestion(response.conversation.question);
+          console.log("💬 Follow-up question:", response.conversation.question);
+        } else if (response.conversation.ready_to_search && response.products.length > 0) {
+          // Ready to search - display products
+          setConversationQuestion(null);
+          setConversationMode(false);
+          setProducts(response.products);
+          setHasSearched(true);
+          dispatch({ type: "SET_QUERY", value: response.conversation.query });
+        }
+      } else {
+        // Normal mode - process immediately
+        dispatch({ type: "SET_QUERY", value: transcript });
+        
+        if (transcript.trim()) {
+          setTimeout(() => {
+            searchByText();
+          }, 500);
+        }
+      }
+    } catch (err) {
+      console.error("Voice conversation error:", err);
+      // Fallback to normal search
+      dispatch({ type: "SET_QUERY", value: transcript });
+      if (transcript.trim()) {
+        setTimeout(() => {
+          searchByText();
+        }, 500);
+      }
     }
-  }, [searchByText]);
+  }, [conversationMode, sessionId, user, searchByText]);
 
   const searchByVoiceFile = useCallback(async (file: File) => {
     console.log("🎤 Simple voice search started");
@@ -518,6 +557,32 @@ export default function HomePage() {
     setSelectedProducts(prev => prev.filter(p => p.id !== productId));
   }, []);
 
+  // Handle conversation answers
+  const handleConversationAnswer = useCallback(async (answer: string) => {
+    console.log("💬 Answer received:", answer);
+    setConversationQuestion(null);
+    
+    // Process the answer through conversation API
+    try {
+      const response = await testVoiceConversation(answer, sessionId, user?.id || null, false);
+      
+      if (response.conversation.ready_to_search && response.products && response.products.length > 0) {
+        setProducts(response.products);
+        setHasSearched(true);
+        setConversationMode(false);
+      } else if (response.conversation.question) {
+        setConversationQuestion(response.conversation.question);
+      }
+    } catch (err) {
+      console.error("Conversation answer error:", err);
+    }
+  }, [sessionId, user]);
+
+  const handleStartConversation = useCallback(() => {
+    setConversationMode(true);
+    setConversationQuestion(null);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       {/* Hero Section */}
@@ -609,7 +674,33 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Quick Stats */}
+               {/* Conversation Mode Toggle */}
+               {showConversationChat ? (
+                 <div className="mt-6 flex items-center justify-center">
+                   <div className="bg-gradient-to-r from-purple-100 to-indigo-100 border border-purple-200 rounded-xl px-4 py-2 flex items-center space-x-2">
+                     <Sparkles className="h-5 w-5 text-purple-600" />
+                     <span className="text-sm font-medium text-purple-800">Conversation Chat is Open</span>
+                     <button
+                       onClick={() => setShowConversationChat(false)}
+                       className="ml-2 text-xs text-purple-600 hover:text-purple-800 underline"
+                     >
+                       Close chat
+                     </button>
+                   </div>
+                 </div>
+               ) : (
+                 <div className="mt-6 flex items-center justify-center">
+                   <button
+                     onClick={() => setShowConversationChat(true)}
+                     className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white border border-transparent rounded-xl px-6 py-3 flex items-center space-x-2 hover:from-purple-600 hover:to-indigo-600 transition-all shadow-lg hover:shadow-xl"
+                   >
+                     <Sparkles className="h-5 w-5" />
+                     <span className="text-sm font-medium">Start Conversation</span>
+                   </button>
+                 </div>
+               )}
+
+               {/* Quick Stats */}
               <div className="mt-8 flex justify-center space-x-8 text-sm text-gray-600">
                 <div className="flex items-center space-x-2">
                   <TrendingUp className="h-4 w-4 text-green-500" />
@@ -919,6 +1010,14 @@ export default function HomePage() {
         selectedProducts={selectedProducts}
         onClearSelection={handleClearSelection}
         onRemoveProduct={handleRemoveProduct}
+      />
+
+      {/* Conversation Chat */}
+      <ConversationChat
+        isOpen={showConversationChat}
+        onClose={() => setShowConversationChat(false)}
+        sessionId={sessionId}
+        userId={user?.id || null}
       />
     </div>
   );
